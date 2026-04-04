@@ -1,47 +1,22 @@
 import React from "react";
 
-const History = ({ history }) => {
+const History = ({ history, handleConstraintChange }) => {
   return (
-    <div className="history-container">
-      <h2>Calculation History</h2>
-
-      <table className="history-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Timestamp</th>
-            <th>Input</th>
-            <th>Solution</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {history.length === 0 ? (
-            <tr>
-              <td colSpan="4" style={{ textAlign: "center" }}>
-                No history
-              </td>
-            </tr>
-          ) : (
-            history.map((item) => (
-              <tr key={item.id}>
-                <td>{item.id}</td>
-                <td>{item.timestamp}</td> {/* added timestamp */}
-                <td className="mono-text">{item.input}</td>
-                <td>
-                  <span
-                    className={`badge ${
-                      item.solution === "Solved" ? "badge-success" : "badge-error"
-                    }`}
-                  >
-                    {item.solution}
-                  </span>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+    <div className="history-section">
+      <h2>History</h2>
+      {history.length === 0 ? <p>No history yet</p> :
+        history.map(entry => (
+          <div key={entry.id} className="history-item">
+            <div className="history-input">{entry.input}</div>
+            <div className="history-solution">
+              {Array.isArray(entry.solution)
+                ? entry.solution.map((res, i) => <div key={i}>{JSON.stringify(res)}</div>)
+                : <div>{entry.solution}</div>
+              }
+            </div>
+          </div>
+        ))
+      }
     </div>
   );
 };

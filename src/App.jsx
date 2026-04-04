@@ -1,100 +1,67 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import axios from "axios";
 import History from "./components/History";
+import "./index.css";
 
 const App = () => {
-  // login state
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  // login inputs
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-
-  // solver states
   const [input, setInput] = useState("");
+  const [constraints, setConstraints] = useState({});
+  const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
 
-  const handleLogin = () => {
-    if (username && password) {
-      setIsLoggedIn(true); // go to home page
-    } else {
-      alert("Enter username and password");
+  const fetchHistory = async () => {
+    const res = await axios.get("http://localhost:5000/api/history");
+    setHistory(res.data);
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const handleSubmit = async () => {
+    try {
+      const res = await axios.post("http://localhost:5000/api/solve", { input, constraints });
+      setResult(res.data.solution);
+      fetchHistory();
+    } catch (err) {
+      setResult(err.response?.data?.error || "Error solving equation");
     }
   };
 
-  const handleSolve = () => {
-    if (!input) return;
-
-    const now = new Date();
-
-    const newEntry = {
-      id: history.length + 1,
-      input: input,
-      solution: "Solved",
-      timestamp: now.toLocaleString(),
-    };
-
-    setHistory([newEntry, ...history]);
-    setInput("");
+  const handleConstraintChange = (variable, key, value) => {
+    setConstraints(prev => ({
+      ...prev,
+      [variable]: { ...prev[variable], [key]: Number(value) }
+    }));
   };
 
-  // 🔐 LOGIN PAGE
-  if (!isLoggedIn) {
-    return (
-      <div className="login-container">
-        <h1>Login</h1>
-
+  return (
+    <div className="app-container">
+      <h1>Equation Solver</h1>
+      <div className="input-section">
         <input
           type="text"
-          placeholder="Username"
-          className="login-input"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="Password"
-          className="login-input"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        <button className="btn" onClick={handleLogin}>
-          Login
-        </button>
-      </div>
-    );
-  }
-
-  // 🏠 HOME PAGE (your existing UI)
-  return (
-    <div>
-      <div className="maindiv">
-        <h1>Equation Solver</h1>
-
-        <textarea
-          className="placeholder"
-          placeholder="Enter your equation (e.g 10x+20y=100)"
+          placeholder="Enter equation, e.g., 10x + 20y = 100"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={e => setInput(e.target.value)}
         />
-
-        <div className="btns">
-          <button className="btn" onClick={handleSolve}>
-            Solve
-          </button>
-
-          <button
-            className="btn"
-            onClick={() => setShowHistory(!showHistory)}
-          >
-            View history
-          </button>
-        </div>
+        <button onClick={handleSubmit}>Solve</button>
       </div>
 
-      {showHistory && <History history={history} />}
+      {result && (
+        <div className="result-section">
+          <h2>Results:</h2>
+          {Array.isArray(result) ? (
+            result.map((res, i) => (
+              <div key={i} className="result-item">{JSON.stringify(res)}</div>
+            ))
+          ) : (
+            <div>{result}</div>
+          )}
+        </div>
+      )}
+
+      <History history={history} handleConstraintChange={handleConstraintChange} />
     </div>
   );
 };
