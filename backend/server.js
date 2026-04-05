@@ -1,124 +1,84 @@
 const express = require('express');
 const cors = require('cors');
-const app = express();
+const { evaluate } = require('mathjs'); // Import mathjs for complex parsing
 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- TOKENIZER & PARSER ---
-const tokenize = (str) => {
-  const tokens = [];
-  const regex = /\s*([0-9]+|[a-z]|[+*/()-=])\s*/g;
-  let m;
-  while ((m = regex.exec(str)) !== null) {
-    const lastToken = tokens[tokens.length - 1];
-    const currentToken = m[1];
-    if (lastToken && /[0-9]+/.test(lastToken) && /[a-z]/.test(currentToken)) tokens.push('*');
-    tokens.push(currentToken);
-  }
-  return tokens;
-};
+let history = [];
 
-class Parser {
-  constructor(tokens) { this.tokens = tokens; this.pos = 0; }
-  parseExpression() {
-    let node = this.parseTerm();
-    while (this.tokens[this.pos] === '+' || this.tokens[this.pos] === '-') {
-      const op = this.tokens[this.pos++];
-      node = { type: 'BinaryOp', op, left: node, right: this.parseTerm() };
-    }
-    return node;
-  }
-  parseTerm() {
-    let node = this.parseFactor();
-    while (this.tokens[this.pos] === '*' || this.tokens[this.pos] === '/') {
-      const op = this.tokens[this.pos++];
-      node = { type: 'BinaryOp', op, left: node, right: this.parseFactor() };
-    }
-    return node;
-  }
-  parseFactor() {
-    const token = this.tokens[this.pos++];
-    if (token === '(') {
-      const node = this.parseExpression();
-      if (this.tokens[this.pos] === ')') this.pos++;
-      return node;
-    }
-    if (/[0-9]+/.test(token)) return { type: 'Number', value: parseInt(token) };
-    if (/[a-z]/.test(token)) return { type: 'Variable', name: token };
-    throw new Error("Syntax Error");
-  }
-}
-
-function evaluateAST(node, vars) {
-  if (node.type === 'Number') return node.value;
-  if (node.type === 'Variable') return vars[node.name] || 0;
-  const left = evaluateAST(node.left, vars);
-  const right = evaluateAST(node.right, vars);
-  if (node.op === '+') return left + right;
-  if (node.op === '-') return left - right;
-  if (node.op === '*') return left * right;
-  if (node.op === '/') return right === 0 ? Infinity : left / right;
-}
-
-// --- SOLVER ---
-const solveQuant = (equationStr, rules = []) => {
-  const [lhs, rhs] = equationStr.replace(/\s/g, '').split('=');
-  const target = parseInt(rhs);
-  const tokens = tokenize(lhs);
-  const parser = new Parser(tokens);
-  const ast = parser.parseExpression();
-  const vars = [...new Set(tokens.filter(t => /[a-z]/.test(t)))].sort();
+// The Recursive Solver
+const solveRecursive = (lhs, target, variables, constraints) => {
   const results = [];
-  const backtrack = (index, current) => {
-    if (results.length >= 2000) return;
-    if (index === vars.length) {
-      if (evaluateAST(ast, current) === target) results.push({ ...current });
+  const varKeys = variables; 
+
+  function backtrack(index, currentScope) {
+    // Base Case: All variables (x, y, z...) have been assigned a test value
+    if (index === varKeys.length) {
+      try {
+        // mathjs handles ((10x+20y)2)+5z automatically
+        const calculatedValue = evaluate(lhs, currentScope);
+        
+        // Use epsilon check for floating point (e.g., 499.99999 === 500)
+        if (Math.abs(calculatedValue - target) < 0.001) {
+          const solutionRow = varKeys.map(k => `${k}:${currentScope[k]}`).join(' | ');
+          results.push(`[ ${solutionRow} ]`);
+        }
+      } catch (err) { /* Ignore math errors like div by zero */ }
       return;
     }
-    const varName = vars[index];
-    let min = 0, max = Math.max(target, 1000);
-    rules.forEach(r => {
-      if (r.variable === varName) {
-        if (r.type === 'min') min = Math.max(min, parseInt(r.value));
-        if (r.type === 'max') max = Math.min(max, parseInt(r.value));
-      }
-    });
+
+    const currentVar = varKeys[index];
+    const { min, max } = constraints[currentVar] || { min: 0, max: 10 }; // Default range
+
     for (let i = min; i <= max; i++) {
-      current[varName] = i;
-      backtrack(index + 1, current);
+      currentScope[currentVar] = i;
+      backtrack(index + 1, { ...currentScope });
+      
+      if (results.length >= 500) break; // Performance cap
     }
-  };
+  }
+
   backtrack(0, {});
   return results;
 };
 
-// --- ROUTES ---
-let historyDB = [];
 app.post('/api/solve', (req, res) => {
-  const { equation, rules } = req.body;
+  const { equation, variables, rules } = req.body;
+
   try {
-    const solutions = solveQuant(equation, rules || []);
-    const formattedOutput = solutions.length > 0 
-      ? solutions.map(s => `{${Object.entries(s).map(([k,v]) => `${k}:${v}`).join(',')}}`).join(',')
-      : "No positive whole number solutions exist.";
-    
-    const record = {
+    const [lhs, rhs] = equation.split('=');
+    const targetValue = evaluate(rhs); // Evaluate RHS in case it's "100 * 5"
+
+    // Map rules to constraints
+    const constraintsMap = {};
+    variables.forEach(v => { constraintsMap[v] = { min: 0, max: 20 }; });
+    rules.forEach(rule => {
+      const v = rule.variable;
+      if (constraintsMap[v]) {
+        if (rule.type === 'min') constraintsMap[v].min = parseInt(rule.value);
+        if (rule.type === 'max') constraintsMap[v].max = parseInt(rule.value);
+      }
+    });
+
+    const solutions = solveRecursive(lhs.trim(), targetValue, variables, constraintsMap);
+
+    const resultEntry = {
       id: Date.now(),
       input: equation,
-      output: formattedOutput,
+      output: solutions.length > 0 ? solutions.join('\n') : "LIMITS_EXCEEDED_OR_NO_SOLUTIONS",
       count: solutions.length,
-      // CHANGE: Added hour12: true for AM/PM display
-      timestamp: new Date().toLocaleString('en-US', { 
-        year: 'numeric', month: '2-digit', day: '2-digit', 
-        hour: '2-digit', minute: '2-digit', second: '2-digit', 
-        hour12: true 
-      })
+      timestamp: new Date().toLocaleTimeString()
     };
-    historyDB.unshift(record);
-    res.json(record);
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    history.unshift(resultEntry);
+    res.json(resultEntry);
+
+  } catch (error) {
+    res.status(500).json({ error: "SYNTAX_ERROR: Check parentheses and operators." });
+  }
 });
 
-app.get('/api/history', (req, res) => res.json(historyDB));
-app.listen(5000, () => console.log("QS_STRICT_SERVER_v4_READY"));
+app.get('/api/history', (req, res) => res.json(history));
+
+app.listen(5000, () => console.log("CORE_ENGINE_ACTIVE: PORT 5000"));
