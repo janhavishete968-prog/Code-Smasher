@@ -1,161 +1,17 @@
-/*  Global Reset */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
-  background-image:url('')
 }
 
-html, body {
-  width: 100%;
-  height: 100%;
-  background-color: #f4f6f8; /* light background */
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
-/* Main App Container  */
-.maindiv {
-  background-color: #0F172A;
-  border: 2px solid #334155;
-  border-radius: 16px;
-  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);
-  color: #F8FAFC;
-  font-weight: 700;
-  font-size: 24px;
-  width: 350px;
-  padding: 20px;
-  margin: 50px auto; /* center horizontally */
-  text-align: center;
-}
-
-/* Textarea */
-.placeholder {
-  width: 100%;
-  min-height: 80px;
-  padding: 10px;
-  margin-top: 20px;
-  border-radius: 15px;
-  border: 1px solid #64748b;
-  font-size: 16px;
-  background-color: #1e293b;
-  color: #f8fafc;
-  resize: none;
-}
-
-/* Buttons */
-.btns {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 20px;
-}
-
-.btn {
-  background-color: #3B82F6;
-  color: white;
-  padding: 8px 16px;
-  border-radius: 10px;
-  border: none;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.btn:hover {
-  background-color: #2563eb;
-}
-
-/*  History Container  */
-.history-container {
-  width: 90%;
-  max-width: 900px;
-  margin: 40px auto;
-  font-family: 'Inter', sans-serif;
-  background-color: #ffffff;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 8px 15px rgba(0,0,0,0.1);
-}
-
-/* History Header */
-.history-container h2 {
-  text-align: center;
-  margin-bottom: 20px;
-  font-size: 28px;
-  color: #333;
-}
-
-/* Table Styling */
-.history-table {
-  width: 100%;
-  border-collapse: collapse;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.history-table th,
-.history-table td {
-  padding: 12px 15px;
-  text-align: left;
-  border-bottom: 1px solid #ddd;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* Table Header */
-.history-table th {
-  background-color: #007BFF;
-  color: white;
-  font-weight: 600;
-}
-
-/* Table Row Hover */
-.history-table tbody tr:hover {
-  background-color: #f1f1f1;
-}
-
-/* Alternate Row Colors */
-.history-table tbody tr:nth-child(even) {
-  background-color: #f9f9f9;
-}
-
-/* Badges */
-.badge {
-  padding: 3px 8px;
-  border-radius: 5px;
-  font-size: 12px;
-  color: white;
-  display: inline-block;
-}
-
-.badge-success {
-  background-color: #28a745;
-}
-
-.badge-error {
-  background-color: #dc3545;
-}
-
-/* Center "No History" text */
-.history-table td[colspan="3"] {
-  text-align: center;
-  color: #555;
-  font-style: italic;
-}
-
-
-
-/* Login Page */
-.login-container {
-  width: 300px;
-  margin: 150px auto;
-  padding: 20px;
-  background-color: #0F172A;
-  border-radius: 15px;
-  text-align: center;
-  color: white;
-}
-
-.login-input {
-  width: 100%;
-  padding: 10px;
-  margin: 10px 0;
-  border-radius: 10px;
-  border: none;
+body {
+  font-family: "Poppins", "Trebuchet MS", "Segoe UI", sans-serif;
+  color: #0f172a;
+  line-height: 1.4;
 }
