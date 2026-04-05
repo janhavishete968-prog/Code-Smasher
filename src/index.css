@@ -1,0 +1,51 @@
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+
+.input-section {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.input-section input {
+  flex: 1;
+  padding: 10px;
+  font-size: 16px;
+}
+
+.input-section button {
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.result-section {
+  margin-bottom: 20px;
+}
+
+.result-item {
+  background: #f0f0f0;
+  padding: 5px;
+  margin: 3px 0;
+}
+
+.history-section {
+  border-top: 1px solid #ccc;
+  padding-top: 10px;
+}
+
+.history-item {
+  margin-bottom: 10px;
+}
+
+.history-input {
+  font-weight: bold;
+}
+
+.history-solution {
+  margin-left: 10px;
+}
