@@ -205,6 +205,10 @@ function solveEquation(equation, rules) {
       return { output: 'Error: Invalid equation format' };
     }
 
+    // Extract all variables from the original equation
+    const varRegex = /[a-z]/gi;
+    const allVariables = [...new Set(equation.match(varRegex) || [])].sort();
+
     const normalizedLeft = normalizeExpression(left);
     const normalizedRight = normalizeExpression(right);
     const leftNode = parse(normalizedLeft);
@@ -232,22 +236,119 @@ function solveEquation(equation, rules) {
       mergeCoefficients(coeffs, leftInfo.coeffs, 1);
       mergeCoefficients(coeffs, rightInfo.coeffs, -1);
       const constant = leftInfo.constant - rightInfo.constant;
-      return solveLinearEquation(coeffs, constant, constraints);
+      
+      const variables = Object.keys(coeffs).filter(v => coeffs[v] !== 0);
+      if (variables.length === 0) {
+        return constant === 0
+          ? { output: 'Infinite solutions exist for the constant equation' }
+          : { output: 'No solutions exist' };
+      }
+
+      const ranges = variables.map(v => {
+        const constraint = constraints[v] || { min: 0, max: 10 };
+        return {
+          var: v,
+          coeff: coeffs[v],
+          min: Math.max(-1000, Number(constraint.min) || 0),
+          max: Math.min(1000, Number(constraint.max) || 10)
+        };
+      });
+
+      const ordered = ranges.sort((a, b) => Math.abs(b.coeff) - Math.abs(a.coeff));
+      const target = -constant;
+      const solutions = [];
+
+      if (ordered.length === 1) {
+        const only = ordered[0];
+        if (only.coeff === 0) {
+          return target === 0
+            ? { output: 'Infinite solutions exist for the constant equation' }
+            : { output: 'No solutions exist' };
+        }
+        if (target % only.coeff !== 0) {
+          return { output: 'No solutions found within the given constraints' };
+        }
+        const value = target / only.coeff;
+        if (value >= only.min && value <= only.max) {
+          // Include all variables in output
+          const result = {};
+          allVariables.forEach(v => {
+            if (v === only.var) {
+              result[v] = value;
+            } else if (coeffs[v] === undefined || coeffs[v] === 0) {
+              result[v] = constraints[v]?.min || 0;
+            }
+          });
+          return { output: `Found 1 solution(s): ${JSON.stringify(result)}` };
+        }
+        return { output: 'No solutions found within the given constraints' };
+      }
+
+      const last = ordered[ordered.length - 1];
+      const independent = ordered.slice(0, -1);
+      const independentCombos = independent.reduce((acc, item) => acc * (item.max - item.min + 1), 1);
+      if (independentCombos > 2000000) {
+        return { output: `Too many combinations (${independentCombos}). Add tighter constraints.` };
+      }
+
+      function search(index, currentSum, assignment) {
+        if (solutions.length >= 100) return;
+        if (index === independent.length) {
+          const remainder = target - currentSum;
+          if (last.coeff === 0) {
+            if (remainder === 0) {
+              const result = { ...assignment, [last.var]: last.min };
+              allVariables.forEach(v => {
+                if (!(v in result) && (coeffs[v] === undefined || coeffs[v] === 0)) {
+                  result[v] = constraints[v]?.min || 0;
+                }
+              });
+              solutions.push(result);
+            }
+            return;
+          }
+          if (remainder % last.coeff !== 0) return;
+          const lastValue = remainder / last.coeff;
+          if (lastValue >= last.min && lastValue <= last.max) {
+            const result = { ...assignment, [last.var]: lastValue };
+            allVariables.forEach(v => {
+              if (!(v in result) && (coeffs[v] === undefined || coeffs[v] === 0)) {
+                result[v] = constraints[v]?.min || 0;
+              }
+            });
+            solutions.push(result);
+          }
+          return;
+        }
+
+        const { var: variable, coeff, min, max } = independent[index];
+        for (let value = min; value <= max; value += 1) {
+          if (solutions.length >= 100) return;
+          assignment[variable] = value;
+          search(index + 1, currentSum + coeff * value, assignment);
+        }
+      }
+
+      search(0, 0, {});
+
+      if (solutions.length === 0) {
+        return { output: 'No solutions found within the given constraints' };
+      }
+
+      return { output: `Found ${solutions.length} solution(s): ${JSON.stringify(solutions)}` };
     }
 
-    const varRegex = /[a-z]/gi;
-    const variables = [...new Set(equation.match(varRegex) || [])].sort();
-    if (variables.length === 0) {
+    if (allVariables.length === 0) {
       return { output: 'Error: No variables found in equation' };
     }
 
-    variables.forEach(v => {
+    allVariables.forEach(v => {
       if (!constraints[v]) {
         constraints[v] = { min: 0, max: 10 };
       }
     });
 
-    const ranges = variables.map(v => ({
+    const ranges = allVariables.map(v => ({
       var: v,
       min: Math.max(-1000, Number(constraints[v].min) || 0),
       max: Math.min(1000, Number(constraints[v].max) || 10)
@@ -264,9 +365,9 @@ function solveEquation(equation, rules) {
 
     function search(index, assignment) {
       if (solutions.length >= 50) return;
-      if (index === variables.length) {
+      if (index === allVariables.length) {
         const scope = {};
-        variables.forEach(v => {
+        allVariables.forEach(v => {
           scope[v] = assignment[v];
         });
         try {
