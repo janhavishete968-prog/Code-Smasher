@@ -71,12 +71,16 @@ Your engine parses and solves scenarios from simple to highly complex.
 
 ## UI Features
 
+- Landing page route at `/` with CTA to solver and Google login
+- Solver route at `/app`
 - Equation input field
 - Constraints input field
 - Visual rule builder (dropdown-based compare/even rules)
 - Demo scenario dashboard
 - Parsed equation summary
 - Results table with recommendation tagging
+- Google authentication (Firebase Auth)
+- User-based history storage (Firestore)
 - Truncation and performance status messaging
 - UI row cap for smooth rendering on large result sets
 
@@ -101,6 +105,16 @@ Constraint parser also accepts user-friendly labels such as `Asset A > 0` and
 ```bash
 npm install
 ```
+
+### Firebase Setup
+
+1. Copy `.env.example` to `.env`.
+2. Fill all `VITE_FIREBASE_*` variables from your Firebase project.
+3. In Firebase console:
+	- Enable Google sign-in in Authentication.
+	- Create Firestore database.
+
+Without Firebase keys, solver features still work, but login/history are disabled.
 
 ### Start Dev Server
 

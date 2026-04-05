@@ -1,49 +1,50 @@
-import React from "react";
+function formatTimestamp(value) {
+  if (!value) {
+    return "Just now";
+  }
 
-const History = ({ history }) => {
+  if (typeof value.toDate === "function") {
+    return value.toDate().toLocaleString();
+  }
+
+  if (value instanceof Date) {
+    return value.toLocaleString();
+  }
+
+  return "Pending";
+}
+
+export default function History({ entries, isLoading, error, isLoggedIn }) {
   return (
-    <div className="history-container">
-      <h2>Calculation History</h2>
+    <section className="history-panel">
+      <div className="history-head">
+        <h2>Your History</h2>
+        <p>Saved equations for the signed-in user. Local fallback is used when cloud sync fails.</p>
+      </div>
 
-      <table className="history-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Timestamp</th>
-            <th>Input</th>
-            <th>Solution</th>
-          </tr>
-        </thead>
+      {!isLoggedIn && <p className="history-empty">Login with Google to save and view history.</p>}
 
-        <tbody>
-          {history.length === 0 ? (
-            <tr>
-              <td colSpan="4" style={{ textAlign: "center" }}>
-                No history
-              </td>
-            </tr>
-          ) : (
-            history.map((item) => (
-              <tr key={item.id}>
-                <td>{item.id}</td>
-                <td>{item.timestamp}</td> {/* added timestamp */}
-                <td className="mono-text">{item.input}</td>
-                <td>
-                  <span
-                    className={`badge ${
-                      item.solution === "Solved" ? "badge-success" : "badge-error"
-                    }`}
-                  >
-                    {item.solution}
-                  </span>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+      {isLoggedIn && isLoading && <p className="history-empty">Loading history...</p>}
+
+      {isLoggedIn && error && <p className="history-error">{error}</p>}
+
+      {isLoggedIn && !isLoading && !error && entries.length === 0 && (
+        <p className="history-empty">No history yet. Solve an equation to create your first entry.</p>
+      )}
+
+      {isLoggedIn && entries.length > 0 && (
+        <ul className="history-list">
+          {entries.map((entry) => (
+            <li key={entry.id || `${entry.equation}-${entry.createdAt || "pending"}`}>
+              <p>{entry.equation}</p>
+              <span>
+                {formatTimestamp(entry.createdAt)}
+                {entry.isLocal ? " - local" : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
-};
-
-export default History;
+}

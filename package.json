@@ -12,8 +12,10 @@
     "test:stress": "node scripts/stress-test.mjs"
   },
   "dependencies": {
+    "firebase": "^12.11.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^6.28.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
