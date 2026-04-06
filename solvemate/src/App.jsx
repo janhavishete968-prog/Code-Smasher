@@ -183,9 +183,26 @@ const App = () => {
                       </div>
                       <div className="rounded-full bg-slate-100 px-4 py-2 text-xs uppercase tracking-[0.24em] text-slate-600">Financial</div>
                     </div>
-                    <div className="rounded-3xl bg-white border border-slate-200 p-6 text-sm leading-relaxed text-slate-800">
+                    {/* <div className="rounded-3xl bg-white border border-slate-200 p-6 text-sm leading-relaxed text-slate-800">
                       {currentResult.output}
-                    </div>
+                    </div> */}
+                    <div className="rounded-3xl bg-white border border-slate-200 p-6 text-sm text-slate-800">
+
+  <div className="mb-4 font-semibold">
+    {currentResult.message}
+  </div>
+
+  {currentResult.solutions?.map((row, i) => (
+    <div key={i}>
+      {Object.entries(row).map(([k, v]) => (
+        <span key={k} className="mr-3">
+          {k} = {v}
+        </span>
+      ))}
+    </div>
+  ))}
+
+</div>
                     <div className="mt-6 text-sm text-slate-500">Perfect combinations shown below.</div>
                   </div>
                 ) : (

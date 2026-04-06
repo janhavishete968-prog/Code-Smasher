@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const { evaluate, simplify, parse, compile } = require('mathjs');
 
 const app = express();
 const PORT = 5000;
@@ -8,426 +7,310 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// History storage
 let history = [];
 const MAX_HISTORY = 40;
 
-function normalizeExpression(expr) {
-  return expr
-    .replace(/([0-9]+)([a-zA-Z]+)/g, '$1*$2')
-    .replace(/([a-zA-Z]+)([0-9]+)/g, '$1*$2')
-    .replace(/([a-zA-Z])\s*\(/g, '$1*(')
-    .replace(/\)\s*([a-zA-Z0-9])/g, ')*$1')
-    .replace(/\s+/g, '');
+/* ---------------- TOKENIZER ---------------- */
+function tokenize(expr) {
+  const tokens = [];
+  let i = 0;
+
+  while (i < expr.length) {
+    let ch = expr[i];
+
+    if (ch === ' ') { i++; continue; }
+
+    if (/[0-9]/.test(ch)) {
+      let num = '';
+      while (i < expr.length && /[0-9]/.test(expr[i])) {
+        num += expr[i++];
+      }
+      tokens.push({ type: 'number', value: Number(num) });
+
+      if (i < expr.length && /[a-z(]/i.test(expr[i])) {
+        tokens.push({ type: 'op', value: '*' });
+      }
+      continue;
+    }
+
+    if (/[a-z]/i.test(ch)) {
+      tokens.push({ type: 'var', value: ch });
+      i++;
+      if (i < expr.length && expr[i] === '(') {
+        tokens.push({ type: 'op', value: '*' });
+      }
+      continue;
+    }
+
+    if ('+-*/()=' .includes(ch)) {
+      tokens.push({ type: 'op', value: ch });
+      i++;
+      continue;
+    }
+
+    throw new Error("Invalid character: " + ch);
+  }
+
+  return tokens;
 }
 
-function mergeCoefficients(target, source, factor = 1) {
-  Object.entries(source).forEach(([key, value]) => {
-    target[key] = (target[key] || 0) + value * factor;
-  });
+/* ---------------- PARSER ---------------- */
+function parseExpression(tokens) {
+  let pos = 0;
+
+  function parsePrimary() {
+    let token = tokens[pos];
+    if (!token) throw new Error("Unexpected end");
+
+    if (token.type === 'number') {
+      pos++;
+      return { type: 'num', value: token.value };
+    }
+
+    if (token.type === 'var') {
+      pos++;
+      return { type: 'var', name: token.value };
+    }
+
+    if (token.value === '(') {
+      pos++;
+      let expr = parseAddSub();
+      if (tokens[pos]?.value !== ')') throw new Error("Missing )");
+      pos++;
+      return expr;
+    }
+
+    throw new Error("Invalid syntax");
+  }
+
+  function parseMulDiv() {
+    let node = parsePrimary();
+    while (tokens[pos] && (tokens[pos].value === '*' || tokens[pos].value === '/')) {
+      let op = tokens[pos++].value;
+      let right = parsePrimary();
+      node = { type: op, left: node, right };
+    }
+    return node;
+  }
+
+  function parseAddSub() {
+    let node = parseMulDiv();
+    while (tokens[pos] && (tokens[pos].value === '+' || tokens[pos].value === '-')) {
+      let op = tokens[pos++].value;
+      let right = parseMulDiv();
+      node = { type: op, left: node, right };
+    }
+    return node;
+  }
+
+  return parseAddSub();
 }
 
-function extractLinearCoefficients(node) {
-  if (node.type === 'ParenthesisNode') {
-    return extractLinearCoefficients(node.content);
+/* ---------------- LINEAR EXTRACTION ---------------- */
+function extract(node) {
+  if (node.type === 'num') return { coeffs: {}, constant: node.value };
+  if (node.type === 'var') return { coeffs: { [node.name]: 1 }, constant: 0 };
+
+  let left = extract(node.left);
+  let right = extract(node.right);
+
+  if (node.type === '+') return combine(left, right, 1);
+  if (node.type === '-') return combine(left, right, -1);
+
+  if (node.type === '*') {
+    if (Object.keys(left.coeffs).length && Object.keys(right.coeffs).length) {
+      throw new Error("Non-linear equation not supported");
+    }
+    return Object.keys(left.coeffs).length ? scale(left, right.constant) : scale(right, left.constant);
   }
 
-  if (node.type === 'ConstantNode') {
-    return { coeffs: {}, constant: Number(node.value), linear: true };
+  if (node.type === '/') {
+    if (Object.keys(right.coeffs).length) throw new Error("Invalid division");
+    if (right.constant === 0) throw new Error("Division by zero");
+    return scale(left, 1 / right.constant);
   }
-
-  if (node.type === 'SymbolNode') {
-    return { coeffs: { [node.name]: 1 }, constant: 0, linear: true };
-  }
-
-  if (node.type === 'OperatorNode') {
-    const [leftNode, rightNode] = node.args;
-    const op = node.op;
-
-    if (op === 'unaryMinus') {
-      const result = extractLinearCoefficients(leftNode);
-      if (!result.linear) return result;
-      Object.keys(result.coeffs).forEach(key => {
-        result.coeffs[key] = -result.coeffs[key];
-      });
-      result.constant = -result.constant;
-      return result;
-    }
-
-    if (op === '+') {
-      const left = extractLinearCoefficients(leftNode);
-      const right = extractLinearCoefficients(rightNode);
-      const coeffs = { ...left.coeffs };
-      mergeCoefficients(coeffs, right.coeffs, 1);
-      return {
-        coeffs,
-        constant: left.constant + right.constant,
-        linear: left.linear && right.linear
-      };
-    }
-
-    if (op === '-') {
-      const left = extractLinearCoefficients(leftNode);
-      const right = extractLinearCoefficients(rightNode);
-      const coeffs = { ...left.coeffs };
-      Object.entries(right.coeffs).forEach(([key, value]) => {
-        coeffs[key] = (coeffs[key] || 0) - value;
-      });
-      return {
-        coeffs,
-        constant: left.constant - right.constant,
-        linear: left.linear && right.linear
-      };
-    }
-
-    if (op === '*') {
-      const left = extractLinearCoefficients(leftNode);
-      const right = extractLinearCoefficients(rightNode);
-      if (!left.linear || !right.linear) return { coeffs: {}, constant: 0, linear: false };
-      const leftVars = Object.keys(left.coeffs).length;
-      const rightVars = Object.keys(right.coeffs).length;
-      if (leftVars > 0 && rightVars > 0) return { coeffs: {}, constant: 0, linear: false };
-
-      if (leftVars === 0) {
-        const coeffs = {};
-        mergeCoefficients(coeffs, right.coeffs, left.constant);
-        return { coeffs, constant: right.constant * left.constant, linear: true };
-      }
-
-      if (rightVars === 0) {
-        const coeffs = {};
-        mergeCoefficients(coeffs, left.coeffs, right.constant);
-        return { coeffs, constant: left.constant * right.constant, linear: true };
-      }
-    }
-
-    if (op === '/') {
-      const left = extractLinearCoefficients(leftNode);
-      const right = extractLinearCoefficients(rightNode);
-      if (!left.linear || !right.linear || Object.keys(right.coeffs).length > 0 || right.constant === 0) {
-        return { coeffs: {}, constant: 0, linear: false };
-      }
-      const factor = 1 / right.constant;
-      const coeffs = {};
-      mergeCoefficients(coeffs, left.coeffs, factor);
-      return { coeffs, constant: left.constant * factor, linear: true };
-    }
-  }
-
-  return { coeffs: {}, constant: 0, linear: false };
 }
 
-function solveLinearEquation(coeffs, constant, constraints) {
-  const variables = Object.keys(coeffs).filter(v => coeffs[v] !== 0);
-  if (variables.length === 0) {
-    return constant === 0
-      ? { output: 'Infinite solutions exist for the constant equation' }
-      : { output: 'No solutions exist' };
+function combine(a, b, sign) {
+  const coeffs = { ...a.coeffs };
+  for (let k in b.coeffs) {
+    coeffs[k] = (coeffs[k] || 0) + sign * b.coeffs[k];
   }
+  return { coeffs, constant: a.constant + sign * b.constant };
+}
 
-  const ranges = variables.map(v => {
-    const constraint = constraints[v] || { min: 0, max: 10 };
-    return {
-      var: v,
-      coeff: coeffs[v],
-      min: Math.max(-1000, Number(constraint.min) || 0),
-      max: Math.min(1000, Number(constraint.max) || 10)
-    };
-  });
+function scale(obj, factor) {
+  const coeffs = {};
+  for (let k in obj.coeffs) {
+    coeffs[k] = obj.coeffs[k] * factor;
+  }
+  return { coeffs, constant: obj.constant * factor };
+}
 
-  const ordered = ranges.sort((a, b) => Math.abs(b.coeff) - Math.abs(a.coeff));
+/* ---------------- LINEAR SOLVER ---------------- */
+function solveLinear(coeffs, constant, constraints) {
+  const vars = Object.keys(coeffs);
   const target = -constant;
   const solutions = [];
+  const MAX_SOLUTIONS = 5000;
 
-  if (ordered.length === 1) {
-    const only = ordered[0];
-    if (only.coeff === 0) {
-      return target === 0
-        ? { output: 'Infinite solutions exist for the constant equation' }
-        : { output: 'No solutions exist' };
-    }
-    if (target % only.coeff !== 0) {
-      return { output: 'No solutions found within the given constraints' };
-    }
-    const value = target / only.coeff;
-    if (value >= only.min && value <= only.max) {
-      return { output: `Found 1 solution(s): ${JSON.stringify({ [only.var]: value })}` };
-    }
-    return { output: 'No solutions found within the given constraints' };
-  }
+  function dfs(i, sum, assign) {
+    if (solutions.length >= MAX_SOLUTIONS) return;
 
-  const last = ordered[ordered.length - 1];
-  const independent = ordered.slice(0, -1);
-  const independentCombos = independent.reduce((acc, item) => acc * (item.max - item.min + 1), 1);
-  if (independentCombos > 2000000) {
-    return { output: `Too many combinations (${independentCombos}). Add tighter constraints.` };
-  }
+    if (i === vars.length - 1) {
+      let v = vars[i];
+      let c = coeffs[v];
+      let remaining = target - sum;
 
-  function search(index, currentSum, assignment) {
-    if (solutions.length >= 100) return;
-    if (index === independent.length) {
-      const remainder = target - currentSum;
-      if (last.coeff === 0) {
-        if (remainder === 0) {
-          solutions.push({ ...assignment, [last.var]: last.min });
+      if (remaining % c === 0) {
+        let val = remaining / c;
+        let { min = 0, max = Infinity } = constraints[v] || {};
+        if (val >= min && val <= max) {
+          solutions.push({ ...assign, [v]: val });
         }
-        return;
-      }
-      if (remainder % last.coeff !== 0) return;
-      const lastValue = remainder / last.coeff;
-      if (lastValue >= last.min && lastValue <= last.max) {
-        solutions.push({ ...assignment, [last.var]: lastValue });
       }
       return;
     }
 
-    const { var: variable, coeff, min, max } = independent[index];
-    for (let value = min; value <= max; value += 1) {
-      if (solutions.length >= 100) return;
-      assignment[variable] = value;
-      search(index + 1, currentSum + coeff * value, assignment);
+    let v = vars[i];
+    let c = coeffs[v];
+    let { min = 0, max = Infinity } = constraints[v] || {};
+
+    let upper = Math.floor((target - sum) / c);
+    if (max !== Infinity) upper = Math.min(upper, max);
+
+    for (let val = min; val <= upper; val++) {
+      assign[v] = val;
+      dfs(i + 1, sum + c * val, assign);
+    }
+    delete assign[v];
+  }
+
+  dfs(0, 0, {});
+
+  return {
+    message: solutions.length ? `Found ${solutions.length} solution(s)` : "No solutions",
+    solutions
+  };
+}
+
+/* ---------------- POLYNOMIAL ---------------- */
+function isPolynomial(eq) {
+  return eq.includes('^');
+}
+
+function solveSingleVarPoly(eq) {
+  let clean = eq.replace(/\s+/g, '');
+  let [L, R] = clean.split('=');
+  let expr = L + "-(" + R + ")";
+
+  let a = 0, b = 0, c = 0;
+  const regex = /([+-]?\d*)x\^2|([+-]?\d*)x(?!\^)|([+-]?\d+)/g;
+  let m;
+
+  while ((m = regex.exec(expr))) {
+    if (m[1] !== undefined) {
+      let v = m[1] === "" || m[1] === "+" ? 1 : m[1] === "-" ? -1 : Number(m[1]);
+      a += v;
+    } else if (m[2] !== undefined) {
+      let v = m[2] === "" || m[2] === "+" ? 1 : m[2] === "-" ? -1 : Number(m[2]);
+      b += v;
+    } else {
+      c += Number(m[3]);
     }
   }
 
-  search(0, 0, {});
+  let D = b*b - 4*a*c;
 
-  if (solutions.length === 0) {
-    return { output: 'No solutions found within the given constraints' };
-  }
+  if (D < 0) return { message: "No real solutions", solutions: [] };
 
-  return { output: `Found ${solutions.length} solution(s): ${JSON.stringify(solutions)}` };
+  return {
+    message: "Polynomial solutions",
+    solutions: [
+      { x: (-b + Math.sqrt(D)) / (2*a) },
+      { x: (-b - Math.sqrt(D)) / (2*a) }
+    ]
+  };
 }
 
-function solveEquation(equation, rules) {
+function solveTwoVarPoly(eq) {
+  const solutions = [];
+
+  for (let x = -20; x <= 20; x++) {
+    for (let y = -20; y <= 20; y++) {
+      let exp = eq.replace(/x/g, `(${x})`)
+                  .replace(/y/g, `(${y})`)
+                  .replace('=', '==');
+
+      try {
+        if (eval(exp)) solutions.push({ x, y });
+      } catch {}
+    }
+  }
+
+  return {
+    message: `Found ${solutions.length} solutions`,
+    solutions
+  };
+}
+
+/* ---------------- MAIN SOLVER ---------------- */
+function solveEquation(eq, rules) {
   try {
-    const [left, right] = equation.split('=').map(s => s.trim());
-    if (!left || !right) {
-      return { output: 'Error: Invalid equation format' };
+    if (isPolynomial(eq)) {
+      const vars = (eq.match(/[a-z]/gi) || []).length;
+
+      if (vars === 1) return solveSingleVarPoly(eq);
+      else return solveTwoVarPoly(eq);
     }
 
-    // Extract all variables from the original equation
-    const varRegex = /[a-z]/gi;
-    const allVariables = [...new Set(equation.match(varRegex) || [])].sort();
+    let [L, R] = eq.split('=');
+    if (!L || !R) return { message: "Invalid format", solutions: [] };
 
-    const normalizedLeft = normalizeExpression(left);
-    const normalizedRight = normalizeExpression(right);
-    const leftNode = parse(normalizedLeft);
-    const rightNode = parse(normalizedRight);
+    const left = extract(parseExpression(tokenize(L)));
+    const right = extract(parseExpression(tokenize(R)));
 
-    const leftInfo = extractLinearCoefficients(leftNode);
-    const rightInfo = extractLinearCoefficients(rightNode);
+    const combined = combine(left, right, -1);
+
     const constraints = {};
-
-    (rules || []).forEach(rule => {
-      if (rule.variable) {
-        if (!constraints[rule.variable]) {
-          constraints[rule.variable] = { min: 0, max: 10 };
-        }
-        if (rule.type === 'min') {
-          constraints[rule.variable].min = Number(rule.value);
-        } else if (rule.type === 'max') {
-          constraints[rule.variable].max = Number(rule.value);
-        }
-      }
+    (rules || []).forEach(r => {
+      if (!constraints[r.variable]) constraints[r.variable] = {};
+      constraints[r.variable][r.type] = Number(r.value);
     });
 
-    if (leftInfo.linear && rightInfo.linear) {
-      const coeffs = {};
-      mergeCoefficients(coeffs, leftInfo.coeffs, 1);
-      mergeCoefficients(coeffs, rightInfo.coeffs, -1);
-      const constant = leftInfo.constant - rightInfo.constant;
-      
-      const variables = Object.keys(coeffs).filter(v => coeffs[v] !== 0);
-      if (variables.length === 0) {
-        return constant === 0
-          ? { output: 'Infinite solutions exist for the constant equation' }
-          : { output: 'No solutions exist' };
-      }
+    return solveLinear(combined.coeffs, combined.constant, constraints);
 
-      const ranges = variables.map(v => {
-        const constraint = constraints[v] || { min: 0, max: 10 };
-        return {
-          var: v,
-          coeff: coeffs[v],
-          min: Math.max(-1000, Number(constraint.min) || 0),
-          max: Math.min(1000, Number(constraint.max) || 10)
-        };
-      });
-
-      const ordered = ranges.sort((a, b) => Math.abs(b.coeff) - Math.abs(a.coeff));
-      const target = -constant;
-      const solutions = [];
-
-      if (ordered.length === 1) {
-        const only = ordered[0];
-        if (only.coeff === 0) {
-          return target === 0
-            ? { output: 'Infinite solutions exist for the constant equation' }
-            : { output: 'No solutions exist' };
-        }
-        if (target % only.coeff !== 0) {
-          return { output: 'No solutions found within the given constraints' };
-        }
-        const value = target / only.coeff;
-        if (value >= only.min && value <= only.max) {
-          // Include all variables in output
-          const result = {};
-          allVariables.forEach(v => {
-            if (v === only.var) {
-              result[v] = value;
-            } else if (coeffs[v] === undefined || coeffs[v] === 0) {
-              result[v] = constraints[v]?.min || 0;
-            }
-          });
-          return { output: `Found 1 solution(s): ${JSON.stringify(result)}` };
-        }
-        return { output: 'No solutions found within the given constraints' };
-      }
-
-      const last = ordered[ordered.length - 1];
-      const independent = ordered.slice(0, -1);
-      const independentCombos = independent.reduce((acc, item) => acc * (item.max - item.min + 1), 1);
-      if (independentCombos > 2000000) {
-        return { output: `Too many combinations (${independentCombos}). Add tighter constraints.` };
-      }
-
-      function search(index, currentSum, assignment) {
-        if (solutions.length >= 100) return;
-        if (index === independent.length) {
-          const remainder = target - currentSum;
-          if (last.coeff === 0) {
-            if (remainder === 0) {
-              const result = { ...assignment, [last.var]: last.min };
-              allVariables.forEach(v => {
-                if (!(v in result) && (coeffs[v] === undefined || coeffs[v] === 0)) {
-                  result[v] = constraints[v]?.min || 0;
-                }
-              });
-              solutions.push(result);
-            }
-            return;
-          }
-          if (remainder % last.coeff !== 0) return;
-          const lastValue = remainder / last.coeff;
-          if (lastValue >= last.min && lastValue <= last.max) {
-            const result = { ...assignment, [last.var]: lastValue };
-            allVariables.forEach(v => {
-              if (!(v in result) && (coeffs[v] === undefined || coeffs[v] === 0)) {
-                result[v] = constraints[v]?.min || 0;
-              }
-            });
-            solutions.push(result);
-          }
-          return;
-        }
-
-        const { var: variable, coeff, min, max } = independent[index];
-        for (let value = min; value <= max; value += 1) {
-          if (solutions.length >= 100) return;
-          assignment[variable] = value;
-          search(index + 1, currentSum + coeff * value, assignment);
-        }
-      }
-
-      search(0, 0, {});
-
-      if (solutions.length === 0) {
-        return { output: 'No solutions found within the given constraints' };
-      }
-
-      return { output: `Found ${solutions.length} solution(s): ${JSON.stringify(solutions)}` };
-    }
-
-    if (allVariables.length === 0) {
-      return { output: 'Error: No variables found in equation' };
-    }
-
-    allVariables.forEach(v => {
-      if (!constraints[v]) {
-        constraints[v] = { min: 0, max: 10 };
-      }
-    });
-
-    const ranges = allVariables.map(v => ({
-      var: v,
-      min: Math.max(-1000, Number(constraints[v].min) || 0),
-      max: Math.min(1000, Number(constraints[v].max) || 10)
-    }));
-
-    const totalCombos = ranges.reduce((acc, item) => acc * (item.max - item.min + 1), 1);
-    if (totalCombos > 200000) {
-      return { output: `Too many possible combinations (${totalCombos}). Please add more constraints.` };
-    }
-
-    const solutions = [];
-    const normalizedExpression = normalizeExpression(`${left}-${right}`);
-    const expression = parse(normalizedExpression);
-
-    function search(index, assignment) {
-      if (solutions.length >= 50) return;
-      if (index === allVariables.length) {
-        const scope = {};
-        allVariables.forEach(v => {
-          scope[v] = assignment[v];
-        });
-        try {
-          const value = evaluate(expression, scope);
-          if (Math.abs(value) < 0.001) {
-            solutions.push({ ...assignment });
-          }
-        } catch (e) {}
-        return;
-      }
-
-      const { var: variable, min, max } = ranges[index];
-      for (let value = min; value <= max; value += 1) {
-        assignment[variable] = value;
-        search(index + 1, assignment);
-      }
-    }
-
-    search(0, {});
-    if (solutions.length === 0) {
-      return { output: 'No solutions found within the given constraints' };
-    }
-
-    return { output: `Found ${solutions.length} solution(s): ${JSON.stringify(solutions)}` };
   } catch (err) {
-    return { output: `Error: ${err.message}` };
+    return { message: err.message, solutions: [] };
   }
 }
 
-// POST /api/solve
+/* ---------------- ROUTES ---------------- */
 app.post('/api/solve', (req, res) => {
   const { equation, rules } = req.body;
 
   if (!equation) {
-    return res.json({ output: 'Error: Missing equation' });
+    return res.json({ success: false, message: "Missing equation", solutions: [] });
   }
 
   const result = solveEquation(equation, rules);
 
-  // Add to history
   history.unshift({
     id: history.length,
     input: equation,
-    output: result.output,
+    output: result.message,
     timestamp: new Date().toLocaleString()
   });
 
-  if (history.length > MAX_HISTORY) {
-    history = history.slice(0, MAX_HISTORY);
-  }
+  history = history.slice(0, MAX_HISTORY);
 
-  res.json(result);
+  res.json({ success: true, ...result });
 });
 
-// GET /api/history
 app.get('/api/history', (req, res) => {
   res.json(history);
 });
 
 app.listen(PORT, () => {
-  console.log(`QuantSolve Node.js backend listening on port ${PORT}`);
-  console.log(`API: http://localhost:${PORT}/api`);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
